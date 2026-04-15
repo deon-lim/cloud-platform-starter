@@ -11,3 +11,6 @@ app/node_modules/
 # macOS
 .DS_Store
 **/.DS_Store
+
+# personal files
+.notes.txt
