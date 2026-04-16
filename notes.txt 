@@ -1,8 +1,0 @@
-alb_dns_name = "cloud-platform-alb-408122490.ap-southeast-1.elb.amazonaws.com"
-ecr_repository_url = "571573791896.dkr.ecr.ap-southeast-1.amazonaws.com/cloud-platform-starter"
-
-AKIAYKFDT5SMEE2PSEWG
-mWIrAEP8FCd8hGV2YOLue3hMtem67WciFAlJpajE
-
-Production: cloud-platform-alb-408122490.ap-southeast-1.elb.amazonaws.com
-Staging:    cloud-platform-alb-staging-800293805.ap-southeast-1.elb.amazonaws.com
