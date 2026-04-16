@@ -46,3 +46,13 @@ module "ecs_staging" {
   aws_region         = var.aws_region
   name               = "staging"
 }
+
+# ── CloudWatch Dashboard ─────────────────────────────────────────────────
+module "cloudwatch_dashboard" {
+  source                = "./modules/cloudwatch"
+  aws_region            = var.aws_region
+  production_alb_suffix = "app/cloud-platform-alb/c7194de7db715c11"
+  staging_alb_suffix    = "app/cloud-platform-alb-staging/6fde2024a5e498df"
+  production_tg_suffix  = "targetgroup/cloud-platform-tg/037d986f122ac4a0"
+  staging_tg_suffix     = "targetgroup/cloud-platform-tg-staging/7491aaaace81d9cf"
+}
