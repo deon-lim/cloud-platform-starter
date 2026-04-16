@@ -1,6 +1,6 @@
 # Cloud Platform Starter
 
-A minimal but production-style cloud platform built on AWS — demonstrating Infrastructure as Code, CI/CD automation, multi-environment deployment, and operational observability.
+Minimal but production-style cloud platform built on AWS — demonstrating Infrastructure as Code, CI/CD automation, multi-environment deployment, and operational observability.
 
 ![CI/CD Pipeline](https://github.com/deon-lim/cloud-platform-starter/actions/workflows/deploy.yml/badge.svg)
 ![Terraform](https://img.shields.io/badge/Terraform-v1.14.8-7B42BC?logo=terraform)
