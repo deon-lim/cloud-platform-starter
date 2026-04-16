@@ -1,21 +1,26 @@
 variable "image_url" {}
 variable "execution_role_arn" {}
 variable "target_group_arn" {}
-variable "subnet_ids" { type = list(string) }
+variable "subnet_ids"        { type = list(string) }
 variable "security_group_id" {}
 variable "aws_region" {}
+variable "name" { default = "" }
+
+locals {
+  suffix = var.name != "" ? "-${var.name}" : ""
+}
 
 resource "aws_cloudwatch_log_group" "app" {
-  name              = "/ecs/cloud-platform"
+  name              = "/ecs/cloud-platform${local.suffix}"
   retention_in_days = 7
 }
 
 resource "aws_ecs_cluster" "main" {
-  name = "cloud-platform-cluster"
+  name = "cloud-platform-cluster${local.suffix}"
 }
 
 resource "aws_ecs_task_definition" "app" {
-  family                   = "cloud-platform-task"
+  family                   = "cloud-platform-task${local.suffix}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = "256"
@@ -35,7 +40,7 @@ resource "aws_ecs_task_definition" "app" {
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        awslogs-group         = "/ecs/cloud-platform"
+        awslogs-group         = "/ecs/cloud-platform${local.suffix}"
         awslogs-region        = var.aws_region
         awslogs-stream-prefix = "ecs"
       }
@@ -44,7 +49,7 @@ resource "aws_ecs_task_definition" "app" {
 }
 
 resource "aws_security_group" "ecs" {
-  name   = "ecs-sg"
+  name   = "ecs-sg${local.suffix}"
   vpc_id = data.aws_subnet.first.vpc_id
 
   ingress {
@@ -67,7 +72,7 @@ data "aws_subnet" "first" {
 }
 
 resource "aws_ecs_service" "app" {
-  name            = "cloud-platform-service"
+  name            = "cloud-platform-service${local.suffix}"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = 1
@@ -85,3 +90,7 @@ resource "aws_ecs_service" "app" {
     container_port   = 3000
   }
 }
+
+output "cluster_name" { value = aws_ecs_cluster.main.name }
+output "service_name" { value = aws_ecs_service.app.name }
+output "task_family"  { value = aws_ecs_task_definition.app.family }

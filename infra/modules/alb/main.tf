@@ -1,8 +1,13 @@
 variable "vpc_id" {}
 variable "subnet_ids" { type = list(string) }
+variable "name"      { default = "" }
+
+locals {
+  suffix = var.name != "" ? "-${var.name}" : ""
+}
 
 resource "aws_security_group" "alb" {
-  name   = "alb-sg"
+  name   = "alb-sg${local.suffix}"
   vpc_id = var.vpc_id
 
   ingress {
@@ -21,7 +26,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_lb" "app" {
-  name               = "cloud-platform-alb"
+  name               = "cloud-platform-alb${local.suffix}"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
@@ -29,7 +34,7 @@ resource "aws_lb" "app" {
 }
 
 resource "aws_lb_target_group" "app" {
-  name        = "cloud-platform-tg"
+  name        = "cloud-platform-tg${local.suffix}"
   port        = 3000
   protocol    = "HTTP"
   vpc_id      = var.vpc_id

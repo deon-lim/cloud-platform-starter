@@ -1,6 +1,11 @@
 output "alb_dns_name" {
   value       = module.alb.dns_name
-  description = "Hit this URL in your browser to reach the app"
+  description = "Production ALB URL"
+}
+
+output "alb_staging_dns_name" {
+  value       = module.alb_staging.dns_name
+  description = "Staging ALB URL"
 }
 
 output "ecr_repository_url" {
