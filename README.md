@@ -2,7 +2,7 @@
 
 A minimal but production-style cloud platform built on AWS — demonstrating Infrastructure as Code, CI/CD automation, and cloud-native platform design.
 
-![CI/CD Pipeline](https://github.com/<your-github-username>/cloud-platform-starter/actions/workflows/deploy.yml/badge.svg)
+![CI/CD Pipeline](https://github.com/deon-lim/cloud-platform-starter/actions/workflows/deploy.yml/badge.svg)
 ![Terraform](https://img.shields.io/badge/Terraform-v1.14.8-7B42BC?logo=terraform)
 ![AWS Region](https://img.shields.io/badge/AWS-ap--southeast--1-FF9900?logo=amazonaws)
 
@@ -116,7 +116,7 @@ cloud-platform-starter/
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/<your-github-username>/cloud-platform-starter.git
+git clone https://github.com/deon-lim/cloud-platform-starter.git
 cd cloud-platform-starter
 ```
 
