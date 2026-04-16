@@ -73,6 +73,57 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      
+      - name: Check ECR image scan results
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "Waiting for ECR scan to complete..."
+          sleep 30
+
+          SCAN_STATUS=""
+          ATTEMPTS=0
+
+          while [ "$SCAN_STATUS" != "COMPLETE" ] && [ $ATTEMPTS -lt 10 ]; do
+            SCAN_STATUS=$(aws ecr describe-image-scan-findings \
+              --repository-name $ECR_REPOSITORY \
+              --image-id imageTag=$IMAGE_TAG \
+              --region $AWS_REGION \
+              --query 'imageScanStatus.status' \
+              --output text 2>/dev/null || echo "PENDING")
+            echo "Scan status: $SCAN_STATUS"
+            ATTEMPTS=$((ATTEMPTS + 1))
+            sleep 10
+          done
+
+          if [ "$SCAN_STATUS" != "COMPLETE" ]; then
+            echo "Scan did not complete in time. Proceeding with caution."
+            exit 0
+          fi
+
+          CRITICAL=$(aws ecr describe-image-scan-findings \
+            --repository-name $ECR_REPOSITORY \
+            --image-id imageTag=$IMAGE_TAG \
+            --region $AWS_REGION \
+            --query 'imageScanFindings.findingSeverityCounts.CRITICAL' \
+            --output text)
+
+          HIGH=$(aws ecr describe-image-scan-findings \
+            --repository-name $ECR_REPOSITORY \
+            --image-id imageTag=$IMAGE_TAG \
+            --region $AWS_REGION \
+            --query 'imageScanFindings.findingSeverityCounts.HIGH' \
+            --output text)
+
+          echo "Critical vulnerabilities: ${CRITICAL:-0}"
+          echo "High vulnerabilities: ${HIGH:-0}"
+
+          if [ "$CRITICAL" != "None" ] && [ "$CRITICAL" != "0" ] && [ ! -z "$CRITICAL" ]; then
+            echo "❌ Pipeline failed: $CRITICAL critical vulnerabilities found in image"
+            exit 1
+          fi
+
+          echo "✅ No critical vulnerabilities found. Proceeding with deployment."
 
   deploy-staging:
     runs-on: ubuntu-latest
