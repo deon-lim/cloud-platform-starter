@@ -1,6 +1,6 @@
 # Cloud Platform Starter
 
-A minimal but production-style cloud platform built on AWS — demonstrating Infrastructure as Code, CI/CD automation, and cloud-native platform design.
+A minimal but production-style cloud platform built on AWS — demonstrating Infrastructure as Code, CI/CD automation, multi-environment deployment, and operational observability.
 
 ![CI/CD Pipeline](https://github.com/deon-lim/cloud-platform-starter/actions/workflows/deploy.yml/badge.svg)
 ![Terraform](https://img.shields.io/badge/Terraform-v1.14.8-7B42BC?logo=terraform)
@@ -23,20 +23,41 @@ ECS Fargate Service  (port 3000)
    │              │
    ▼              ▼
 ECR           CloudWatch
-(image pull)  (container logs)
+(image pull)  (logs + dashboard metrics)
 ```
 
-Every push to `main` triggers the CI/CD pipeline:
+The same architecture runs across two environments — **production** and **staging** — each with their own ALB, ECS cluster, and CloudWatch log group.
+
+---
+
+## CI/CD Pipeline
+
+Every push to `main` triggers a 5-job pipeline:
 
 ```
 git push origin main
       │
       ▼
-GitHub Actions
+[1] test          ← ESLint + Jest must pass
       │
-      ├── Build Docker image (linux/amd64)
-      ├── Push to ECR (tagged with commit SHA + latest)
-      └── Force ECS redeployment
+      ▼
+[2] build         ← Docker image built (linux/amd64)
+      │              Tagged with commit SHA + latest
+      │              Pushed to ECR
+      │              ECR vulnerability scan — CRITICAL CVEs fail pipeline
+      │
+      ▼
+[3] deploy-staging   ← New task definition registered with SHA image
+      │                 ECS staging service updated
+      │                 Pipeline waits for service stability
+      │
+      ▼
+[4] deploy-production ← Same image promoted to production
+      │                  Pipeline waits for service stability
+      │
+      ▼
+[5] notify         ← Email sent only on failure
+                      Includes commit SHA, actor, link to failed run
 ```
 
 ---
@@ -46,14 +67,16 @@ GitHub Actions
 | Tool / Service | Purpose |
 |---|---|
 | Terraform | Infrastructure as Code — provisions all AWS resources |
-| AWS ECS Fargate | Serverless container runtime |
-| Amazon ECR | Private Docker image registry |
+| AWS ECS Fargate | Serverless container runtime — no servers to manage |
+| Amazon ECR | Private Docker image registry with vulnerability scanning |
 | AWS ALB | Public entry point and health check manager |
 | AWS IAM | Least-privilege task execution role |
-| AWS CloudWatch | Container log aggregation |
-| GitHub Actions | CI/CD pipeline |
+| AWS CloudWatch | Container logs + live operational dashboard |
+| GitHub Actions | 5-job CI/CD pipeline |
 | Express (Node.js) | Minimal application |
-| Docker | Container runtime |
+| Jest + Supertest | Endpoint tests run as pipeline gate |
+| ESLint | Linting enforced before build |
+| Docker | Container runtime (Alpine base image) |
 
 ---
 
@@ -64,24 +87,40 @@ cloud-platform-starter/
 │
 ├── app/                        Application layer
 │   ├── index.js               Express app (/ and /health routes)
-│   ├── package.json           Node dependencies
+│   ├── index.test.js          Jest tests for all endpoints
+│   ├── package.json           Node dependencies + scripts
+│   ├── eslint.config.cjs      ESLint configuration
 │   └── Dockerfile             Container definition (linux/amd64)
 │
 ├── infra/                      Infrastructure as Code (Terraform)
-│   ├── main.tf                Root module — wires all modules together
+│   ├── main.tf                Root module — all environment modules
 │   ├── variables.tf           Input variables (region, VPC, subnets)
-│   ├── outputs.tf             ALB DNS name, ECR repository URL
+│   ├── outputs.tf             ALB DNS names, ECR repository URL
 │   ├── terraform.tfvars       Environment values (gitignored)
 │   └── modules/
-│       ├── ecr/               Private image registry
-│       ├── iam/               ECS task execution role
+│       ├── ecr/               Private image registry (shared)
+│       ├── iam/               ECS task execution role (shared)
 │       ├── alb/               Load balancer, target group, listener
-│       └── ecs/               Cluster, task definition, service, logs
+│       ├── ecs/               Cluster, task definition, service, logs
+│       └── cloudwatch/        Dashboard with 8 live metric panels
 │
 └── .github/
     └── workflows/
-        └── deploy.yml         CI/CD pipeline definition
+        └── deploy.yml         5-job CI/CD pipeline definition
 ```
+
+---
+
+## Environments
+
+| Resource | Production | Staging |
+|---|---|---|
+| ALB | cloud-platform-alb | cloud-platform-alb-staging |
+| ECS Cluster | cloud-platform-cluster | cloud-platform-cluster-staging |
+| ECS Service | cloud-platform-service | cloud-platform-service-staging |
+| Task Family | cloud-platform-task | cloud-platform-task-staging |
+| Log Group | /ecs/cloud-platform | /ecs/cloud-platform-staging |
+| Image Registry | ECR (shared) | ECR (shared) |
 
 ---
 
@@ -99,7 +138,7 @@ cloud-platform-starter/
 ### AWS Account
 
 - An AWS account (free tier is sufficient)
-- An IAM user (`cloud-platform-dev`) with the following policies:
+- A dedicated IAM user with the following policies:
   - `AmazonECS_FullAccess`
   - `AmazonEC2ContainerRegistryFullAccess`
   - `AmazonEC2FullAccess`
@@ -162,10 +201,12 @@ terraform plan
 terraform apply
 ```
 
-This provisions 12 AWS resources. Note the outputs:
+This provisions all AWS resources for both production and staging environments plus the CloudWatch Dashboard. Note the outputs:
+
 ```
-alb_dns_name       = "cloud-platform-alb-xxxxxxxxx.ap-southeast-1.elb.amazonaws.com"
-ecr_repository_url = "xxxxxxxxxxxx.dkr.ecr.ap-southeast-1.amazonaws.com/cloud-platform-starter"
+alb_dns_name         = "cloud-platform-alb-xxx.ap-southeast-1.elb.amazonaws.com"
+alb_staging_dns_name = "cloud-platform-alb-staging-xxx.ap-southeast-1.elb.amazonaws.com"
+ecr_repository_url   = "xxxxxxxxxxxx.dkr.ecr.ap-southeast-1.amazonaws.com/cloud-platform-starter"
 ```
 
 ### 6. Push First Image to ECR
@@ -175,31 +216,30 @@ ecr_repository_url = "xxxxxxxxxxxx.dkr.ecr.ap-southeast-1.amazonaws.com/cloud-pl
 aws ecr get-login-password --region ap-southeast-1 | \
   docker login --username AWS --password-stdin <ecr_repository_url>
 
-# Build and push
+# Build and push for linux/amd64
 cd app
 docker buildx build --platform linux/amd64 \
   -t <ecr_repository_url>:latest \
   --push .
 
-# Force ECS to deploy
+# Force ECS to deploy (production)
 aws ecs update-service \
   --cluster cloud-platform-cluster \
   --service cloud-platform-service \
   --force-new-deployment \
   --region ap-southeast-1
-```
 
-Wait ~2 minutes, then test:
-```bash
-curl http://<alb_dns_name>/
-curl http://<alb_dns_name>/health
+# Force ECS to deploy (staging)
+aws ecs update-service \
+  --cluster cloud-platform-cluster-staging \
+  --service cloud-platform-service-staging \
+  --force-new-deployment \
+  --region ap-southeast-1
 ```
 
 ---
 
-## CI/CD Pipeline
-
-The pipeline lives in `.github/workflows/deploy.yml` and triggers automatically on every push to `main`.
+## CI/CD Pipeline Setup
 
 ### Add GitHub Secrets
 
@@ -209,19 +249,12 @@ Go to your repo → **Settings** → **Secrets and variables** → **Actions** a
 |---|---|
 | `AWS_ACCESS_KEY_ID` | Your IAM user access key ID |
 | `AWS_SECRET_ACCESS_KEY` | Your IAM user secret access key |
-
-### Pipeline Steps
-
-1. Checkout code
-2. Configure AWS credentials from GitHub Secrets
-3. Authenticate Docker to ECR
-4. Build Docker image for `linux/amd64`
-5. Push image to ECR — tagged with commit SHA and `latest`
-6. Force ECS service redeployment
+| `NOTIFY_EMAIL` | Your Gmail address for failure notifications |
+| `NOTIFY_EMAIL_PASSWORD` | Gmail app password (16-character) |
 
 ### Triggering a Deployment
 
-Simply push any change to `main`:
+Push any change to `main`:
 
 ```bash
 git add .
@@ -229,7 +262,7 @@ git commit -m "your change"
 git push origin main
 ```
 
-Monitor the run under the **Actions** tab in GitHub.
+Monitor the run under the **Actions** tab in GitHub. All 5 jobs run automatically.
 
 ---
 
@@ -240,15 +273,40 @@ Monitor the run under the **Actions** tab in GitHub.
 | `http://<alb_dns_name>/` | GET | `{ status, message, version }` |
 | `http://<alb_dns_name>/health` | GET | `{ healthy: true }` |
 
+Both production and staging expose the same endpoints on their respective ALB URLs.
+
+---
+
+## Running Tests Locally
+
+```bash
+cd app
+npm install
+npm test       # Jest endpoint tests
+npm run lint   # ESLint
+```
+
 ---
 
 ## Monitoring & Logs
 
-Container logs are streamed to CloudWatch automatically via the `awslogs` log driver.
+### CloudWatch Dashboard
 
-- **Log group:** `/ecs/cloud-platform`
-- **Retention:** 7 days
-- **Access:** AWS Console → CloudWatch → Log Management → Log Groups → `/ecs/cloud-platform`
+- **Access:** AWS Console → CloudWatch → Dashboards → `cloud-platform-dashboard`
+- **Panels:** 8 live metric panels across production and staging
+  - ALB Request Count
+  - ALB 5xx Error Rate
+  - ECS CPU Utilisation
+  - ECS Memory Utilisation
+
+### Container Logs
+
+| Environment | Log Group |
+|---|---|
+| Production | `/ecs/cloud-platform` |
+| Staging | `/ecs/cloud-platform-staging` |
+
+**Access:** AWS Console → CloudWatch → Log Management → Log Groups
 
 ---
 
@@ -261,9 +319,9 @@ cd infra
 terraform destroy
 ```
 
-Type `yes` to confirm. This will remove all 12 resources including the ALB, ECS cluster, ECR repository, IAM role, and CloudWatch log group.
+Type `yes` to confirm. This removes all resources across both environments including ALBs, ECS clusters, ECR repository, IAM role, CloudWatch log groups, and the dashboard.
 
-> ⚠️ This is irreversible. Make sure you no longer need the resources before running this command.
+> ⚠️ This is irreversible. Ensure you no longer need the resources before running.
 
 ---
 
@@ -273,10 +331,14 @@ Type `yes` to confirm. This will remove all 12 resources including the ALB, ECS 
 |---|---|
 | ECS Fargate over EKS | No node management overhead. Right-sized for a platform starter — EKS adds complexity only justified when Kubernetes-native features are needed |
 | IAM role over hardcoded credentials | ECS assumes the task execution role at runtime. No access keys in code, no rotation risk |
-| Modular Terraform | Each module owns one concern. Easier to reason about, test, and reuse independently |
-| Commit SHA image tagging | Every deployment is traceable to a specific commit. Enables precise rollbacks — `latest` alone does not |
-| Alpine base image | ~50MB vs ~300MB for the full Node image. Smaller attack surface and faster ECR pull times |
-| Health check on `/health` | Dedicated endpoint for the ALB to probe. Separates platform health signalling from application logic |
+| Modular Terraform | Each module owns one concern. Reused across environments via a name variable pattern |
+| Shared ECR, separate ECS | One registry for all images, isolated runtime environments per deployment target |
+| Commit SHA image tagging | Every deployment is traceable to a specific commit. Enables precise rollbacks |
+| Single build, dual deploy | Image built once in the build job, SHA passed as output to both deploy jobs — staging and production always run identical images |
+| Alpine base image | ~50MB vs ~300MB for the full Node image. Smaller attack surface, faster ECR pull times |
+| Health check on `/health` | Dedicated endpoint for ALB probing. Separates platform health signalling from application logic |
+| Vulnerability scan gate | Pipeline polls ECR scan results after push. Critical CVEs block deployment to all environments |
+| Staging before production | deploy-production has needs: [build, deploy-staging] — staging failure stops the pipeline before production is touched |
 
 ---
 
@@ -285,9 +347,9 @@ Type `yes` to confirm. This will remove all 12 resources including the ALB, ECS 
 - **HTTPS** via ACM certificate and Route 53 custom domain
 - **Private subnets** for ECS — ALB in public, containers in private
 - **ECS Auto Scaling** based on ALB request count or CPU utilisation
+- **ECS deployment circuit breaker** for automatic rollback on failed deployments
 - **Remote Terraform state** in S3 with DynamoDB locking
-- **Separate environments** via Terraform workspaces (staging / production)
-- **Pipeline test stage** — unit tests and linting before image build
 - **Manual approval gate** before production deployment
 - **CloudWatch Alarms** on ECS CPU, memory, and ALB 5xx error rate
 - **Structured JSON logging** for CloudWatch Insights queries
+- **Integration tests** against the staging URL before production promotion
